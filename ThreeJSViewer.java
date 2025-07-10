@@ -12,7 +12,6 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.PhongMaterial;
 import javafx.scene.shape.Box;
-import javafx.scene.shape.Cylinder;
 import javafx.scene.shape.DrawMode;
 import javafx.scene.shape.MeshView;
 import javafx.scene.shape.Shape3D;
@@ -102,21 +101,8 @@ public class ThreeJSViewer extends Application {
                     double radiusBottom = go.get("radiusBottom").getAsDouble();
                     double height = go.get("height").getAsDouble();
                     int radialSegments = go.get("radialSegments").getAsInt();
-                    if (radiusTop == radiusBottom) {
-                        Cylinder cylinder = new Cylinder(radiusTop, height, radialSegments);
-                        cylinder.setDrawMode(DrawMode.FILL);
-                        geoMap.put(uuid, cylinder);
-                    } else {
-                        // Treat as cone if one radius is 0
-                        double coneRadius = (radiusTop == 0) ? radiusBottom : radiusTop;
-                        boolean inverted = (radiusTop == 0);
-                        MeshView cone = createCone(coneRadius, height, radialSegments);
-                        if (inverted) {
-                            // Flip if top is 0
-                            cone.getTransforms().add(new Affine(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0));
-                        }
-                        geoMap.put(uuid, cone);
-                    }
+                    MeshView frustum = createFrustum(radiusTop, radiusBottom, height, radialSegments);
+                    geoMap.put(uuid, frustum);
                     break;
                 case "BoxGeometry":
                     double width = go.get("width").getAsDouble();
@@ -125,10 +111,11 @@ public class ThreeJSViewer extends Application {
                     geoMap.put(uuid, new Box(width, h, depth));
                     break;
                 case "ConeGeometry":
-                    double coneR = go.get("radius").getAsDouble();
-                    double coneH = go.get("height").getAsDouble();
+                    double radius = go.get("radius").getAsDouble();
+                    double coneHeight = go.get("height").getAsDouble();
                     int coneSegments = go.get("radialSegments").getAsInt();
-                    geoMap.put(uuid, createCone(coneR, coneH, coneSegments));
+                    MeshView cone = createFrustum(0, radius, coneHeight, coneSegments);
+                    geoMap.put(uuid, cone);
                     break;
                 case "PlaneGeometry":
                     double pWidth = go.get("width").getAsDouble();
@@ -206,74 +193,163 @@ public class ThreeJSViewer extends Application {
         return new Color(r, g, b, 1.0);
     }
 
-    private MeshView createCone(double radius, double height, int segments) {
+    private MeshView createFrustum(double radiusTop, double radiusBottom, double height, int segments) {
         TriangleMesh mesh = new TriangleMesh();
-        int pointCount = segments + 2; // Apex + base points + base center
-        float[] points = new float[pointCount * 3];
-        float[] texCoords = new float[pointCount * 2];
-        int faceCount = segments * 2; // Sides + base triangles
-        int[] faces = new int[faceCount * 6];
-
-        // Apex
-        points[0] = 0;
-        points[1] = (float) height / 2;
-        points[2] = 0;
-        texCoords[0] = 0.5f;
-        texCoords[1] = 0f;
-
-        // Base center
-        int baseCenterIndex = segments + 1;
-        points[baseCenterIndex * 3] = 0;
-        points[baseCenterIndex * 3 + 1] = -(float) height / 2;
-        points[baseCenterIndex * 3 + 2] = 0;
-        texCoords[baseCenterIndex * 2] = 0.5f;
-        texCoords[baseCenterIndex * 2 + 1] = 1f;
-
-        // Base circle points
-        for (int i = 0; i < segments; i++) {
-            double angle = 2 * Math.PI * i / segments;
-            float x = (float) (radius * Math.cos(angle));
-            float z = (float) (radius * Math.sin(angle));
-            points[(i + 1) * 3] = x;
-            points[(i + 1) * 3 + 1] = -(float) height / 2;
-            points[(i + 1) * 3 + 2] = z;
-            texCoords[(i + 1) * 2] = (float) i / segments;
-            texCoords[(i + 1) * 2 + 1] = 1f;
+        float[] points;
+        float[] texCoords;
+        int[] faces;
+        if (radiusTop == 0) {
+            // Cone with apex at top
+            int pointCount = segments + 2;
+            points = new float[pointCount * 3];
+            texCoords = new float[pointCount * 2];
+            int faceCount = segments * 2;
+            faces = new int[faceCount * 6];
+            // Apex
+            points[0] = 0;
+            points[1] = (float) height / 2;
+            points[2] = 0;
+            texCoords[0] = 0.5f;
+            texCoords[1] = 0f;
+            // Base center
+            int baseCenter = segments + 1;
+            points[baseCenter * 3] = 0;
+            points[baseCenter * 3 + 1] = (float) -height / 2;
+            points[baseCenter * 3 + 2] = 0;
+            texCoords[baseCenter * 2] = 0.5f;
+            texCoords[baseCenter * 2 + 1] = 1f;
+            // Base circle
+            for (int i = 0; i < segments; i++) {
+                double angle = 2 * Math.PI * i / segments;
+                float x = (float) (radiusBottom * Math.cos(angle));
+                float z = (float) (radiusBottom * Math.sin(angle));
+                points[(i + 1) * 3] = x;
+                points[(i + 1) * 3 + 1] = (float) -height / 2;
+                points[(i + 1) * 3 + 2] = z;
+                texCoords[(i + 1) * 2] = (float) i / segments;
+                texCoords[(i + 1) * 2 + 1] = 1f;
+            }
+            // Faces
+            int idx = 0;
+            // Side
+            for (int i = 0; i < segments; i++) {
+                int p0 = 0;
+                int p1 = i + 1;
+                int p2 = (i + 1) % segments + 1;
+                faces[idx++] = p0;
+                faces[idx++] = 0;
+                faces[idx++] = p2;
+                faces[idx++] = p2;
+                faces[idx++] = p1;
+                faces[idx++] = p1;
+            }
+            // Base
+            for (int i = 0; i < segments; i++) {
+                int p0 = baseCenter;
+                int p1 = i + 1;
+                int p2 = (i + 1) % segments + 1;
+                faces[idx++] = p0;
+                faces[idx++] = p0;
+                faces[idx++] = p1;
+                faces[idx++] = p1;
+                faces[idx++] = p2;
+                faces[idx++] = p2;
+            }
+        } else {
+            // Frustum with both radii >0
+            int pointCount = segments * 2 + 2;
+            points = new float[pointCount * 3];
+            texCoords = new float[pointCount * 2];
+            int faceCount = segments * 4;
+            faces = new int[faceCount * 6];
+            // Top circle
+            for (int i = 0; i < segments; i++) {
+                double angle = 2 * Math.PI * i / segments;
+                float x = (float) (radiusTop * Math.cos(angle));
+                float z = (float) (radiusTop * Math.sin(angle));
+                points[i * 3] = x;
+                points[i * 3 + 1] = (float) height / 2;
+                points[i * 3 + 2] = z;
+                texCoords[i * 2] = (float) i / segments;
+                texCoords[i * 2 + 1] = 0f;
+            }
+            // Bottom circle
+            int bottomOff = segments;
+            for (int i = 0; i < segments; i++) {
+                double angle = 2 * Math.PI * i / segments;
+                float x = (float) (radiusBottom * Math.cos(angle));
+                float z = (float) (radiusBottom * Math.sin(angle));
+                points[bottomOff * 3 + i * 3] = x;
+                points[bottomOff * 3 + i * 3 + 1] = (float) -height / 2;
+                points[bottomOff * 3 + i * 3 + 2] = z;
+                texCoords[bottomOff * 2 + i * 2] = (float) i / segments;
+                texCoords[bottomOff * 2 + i * 2 + 1] = 1f;
+            }
+            // Top center
+            int topCenter = segments * 2;
+            points[topCenter * 3] = 0;
+            points[topCenter * 3 + 1] = (float) height / 2;
+            points[topCenter * 3 + 2] = 0;
+            texCoords[topCenter * 2] = 0.5f;
+            texCoords[topCenter * 2 + 1] = 0.5f;
+            // Bottom center
+            int bottomCenter = topCenter + 1;
+            points[bottomCenter * 3] = 0;
+            points[bottomCenter * 3 + 1] = (float) -height / 2;
+            points[bottomCenter * 3 + 2] = 0;
+            texCoords[bottomCenter * 2] = 0.5f;
+            texCoords[bottomCenter * 2 + 1] = 0.5f;
+            // Faces
+            int idx = 0;
+            // Side
+            for (int i = 0; i < segments; i++) {
+                int top1 = i;
+                int top2 = (i + 1) % segments;
+                int bottom1 = bottomOff + i;
+                int bottom2 = bottomOff + (i + 1) % segments;
+                // Tri1
+                faces[idx++] = top1;
+                faces[idx++] = top1;
+                faces[idx++] = bottom1;
+                faces[idx++] = bottom1;
+                faces[idx++] = bottom2;
+                faces[idx++] = bottom2;
+                // Tri2
+                faces[idx++] = top1;
+                faces[idx++] = top1;
+                faces[idx++] = bottom2;
+                faces[idx++] = bottom2;
+                faces[idx++] = top2;
+                faces[idx++] = top2;
+            }
+            // Top cap
+            for (int i = 0; i < segments; i++) {
+                int p1 = topCenter;
+                int p2 = i;
+                int p3 = (i + 1) % segments;
+                faces[idx++] = p1;
+                faces[idx++] = p1;
+                faces[idx++] = p2;
+                faces[idx++] = p2;
+                faces[idx++] = p3;
+                faces[idx++] = p3;
+            }
+            // Bottom cap
+            for (int i = 0; i < segments; i++) {
+                int p1 = bottomCenter;
+                int p2 = bottomOff + i;
+                int p3 = bottomOff + (i + 1) % segments;
+                faces[idx++] = p1;
+                faces[idx++] = p1;
+                faces[idx++] = p3;
+                faces[idx++] = p3;
+                faces[idx++] = p2;
+                faces[idx++] = p2;
+            }
         }
-
-        // Side faces
-        int idx = 0;
-        for (int i = 0; i < segments; i++) {
-            int p0 = 0; // Apex
-            int p1 = i + 1;
-            int p2 = (i + 1) % segments + 1;
-            int t0 = 0;
-            int t1 = i + 1;
-            int t2 = (i + 1) % segments + 1;
-
-            faces[idx++] = p0; faces[idx++] = t0;
-            faces[idx++] = p2; faces[idx++] = t2;
-            faces[idx++] = p1; faces[idx++] = t1;
-        }
-
-        // Base faces (note winding for outward normal)
-        for (int i = 0; i < segments; i++) {
-            int p0 = baseCenterIndex;
-            int p1 = i + 1;
-            int p2 = (i + 1) % segments + 1;
-            int t0 = baseCenterIndex;
-            int t1 = i + 1;
-            int t2 = (i + 1) % segments + 1;
-
-            faces[idx++] = p0; faces[idx++] = t0;
-            faces[idx++] = p1; faces[idx++] = t1;
-            faces[idx++] = p2; faces[idx++] = t2;
-        }
-
         mesh.getPoints().addAll(points);
         mesh.getTexCoords().addAll(texCoords);
         mesh.getFaces().addAll(faces);
-
         return new MeshView(mesh);
     }
 
